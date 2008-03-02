@@ -1,5 +1,5 @@
 /*
-	Userspace UDP relay.
+	Userspace UDP relay. Think of it as poor man's single-port UDP DNAT/SNAT.
 */
 
 #include <stdio.h>          // Needed for printf()
@@ -10,15 +10,31 @@
 #include <netinet/in.h>   // Needed for internet address structure.
 #include <sys/socket.h>   // Needed for socket(), bind(), etc...
 #include <arpa/inet.h>    // Needed for inet_ntoa()
+#include <sys/time.h>
 #include <fcntl.h>
 #include <netdb.h>
 #include <unistd.h>
 #include <errno.h>
+#include <signal.h>
 
 #include <iostream>
+#include <iomanip>
+#include <fstream>
 #include <string>
 #include <sstream>
 #include <map>
+#include <vector>
+
+typedef unsigned long long uint64;
+
+int gc_interval = 60; // connection _may_ be dropped if there was no activity within gc_interval,
+		      // and _will_ be dropped if there was no activity within 2*gc_interval
+std::string status_file = "status.txt";	// status file -- will be updated every gc_interval seconds with status info
+std::string log_file = "log.txt"; // log file
+
+int shutdown_interval = 120; // shutdown if there's no activity in shutdown_interval seconds (set to 0 to disable)
+
+time_t time_of_start = time(NULL);
 
 unsigned int bind_socket(unsigned short &base)
 {
@@ -88,10 +104,15 @@ protected:
 	char buffer[30000];
 	endpoint from_tmp;
 	socklen_t from_len;
-	int total_received;
-	int total_sent;
+
+	bool dirty;
+protected:
+	void touch() { dirty = true; }
 
 public:
+	uint64 total_received;	// bytes received
+	uint64 total_sent;	// bytes sent
+
 	endpoint dest;		// destination for this socket (intranet side)
 	endpoint source;	// source for this socket (internet side)
 
@@ -99,7 +120,12 @@ public:
 	unsigned short sock_port;	// port to which sock is bound
 	connection *const proxy;	// socket on the other side of the relay (for forwarding to the internet side)
 
-	connection(connection *proxy_ = NULL) : sock(0), proxy(proxy_), from_len(sizeof(sockaddr_in)), total_sent(0), total_received(0) { }
+	connection(connection *proxy_ = NULL)
+		: sock(0), proxy(proxy_), from_len(sizeof(sockaddr_in)), total_sent(0), total_received(0),
+		  dirty(true)
+		{ }
+
+	bool clear_dirty() { bool d = dirty; dirty = false; return d; }
 
 	bool initialize(const endpoint &dest_, const endpoint &source_, uint16_t port_to_bind = 0)
 	{
@@ -108,6 +134,7 @@ public:
 		sock_port = port_to_bind;
 
 		sock = bind_socket(sock_port);
+		touch();
 
 //		std::cerr << "dest=" << dest.getHost() << ":" << dest.getPort() << ", listening_on=" << sock_port << "\n";
 //		std::cerr << stats() << "\n";
@@ -132,6 +159,7 @@ public:
 				return errno == EAGAIN || errno == EWOULDBLOCK;
 			}
 			total_received += succ;
+			touch();
 //			std::cerr << " Packet: " << succ << " Message = '" << buffer << "'\n";
 //			std::cerr << "   From: " << inet_ntoa(from_tmp.addr.sin_addr) << ":" << (int)ntohs(from_tmp.addr.sin_port) << "\n";
 			
@@ -146,6 +174,7 @@ public:
 		{
 			return false;
 		}
+		touch();
 	}
 
 	bool send(const char *buffer, int len, endpoint *dest = NULL)
@@ -160,6 +189,7 @@ public:
 		ssize_t succ = sendto(sock, buffer, len, 0, (struct sockaddr *)&dest->addr, sizeof(dest->addr));
 		if(succ != -1) { total_sent += succ; }
 //		std::cerr << "Out!\n";
+		touch();
 		return succ != -1;
 	}
 	
@@ -182,22 +212,25 @@ public:
 		   ;
 #endif
 		if(!proxy) {
-			ss << "A: "
-			   << (std::string)inet_ntoa(source.addr.sin_addr) << ":" << (int)ntohs(source.addr.sin_port) << "  --  "
-			   << ":" << sock_port
-			   << " <---> "
+			ss
+			   << (std::string)inet_ntoa(source.addr.sin_addr) << ":" << (int)ntohs(source.addr.sin_port)
+			   << "  <-->  ["
+			   << sock_port
+			   << "]  <--> "
 			   << (std::string)inet_ntoa(dest.addr.sin_addr) << ":" << (int)ntohs(dest.addr.sin_port)
 			   ;
 		} else {
-			ss << "A: "
-			   << (std::string)inet_ntoa(source.addr.sin_addr) << ":" << (int)ntohs(source.addr.sin_port) << "  --  "
-			   << ":" << proxy->sock_port
-		           << " <---> "
-			   << " :" << sock_port << " "
+			ss
+			   << (std::string)inet_ntoa(source.addr.sin_addr) << ":" << (int)ntohs(source.addr.sin_port)
+			   << "  <-->  ["
+			   << proxy->sock_port
+		           << ":"
+			   << sock_port
+			   << "]  <-->  "
 			   << (std::string)inet_ntoa(dest.addr.sin_addr) << ":" << (int)ntohs(dest.addr.sin_port)
 			;
 		}
-		ss << " [S=" << total_sent << ", R=" << total_received << "]";
+		ss << " [out=" << total_sent << "B, in=" << total_received << "B]";
 		return ss.str();
 	}
 };
@@ -213,6 +246,12 @@ struct connection_less
 	}
 };
 
+void ctrlc_signal_handler(int sig);
+void timer_signal_handler(int sig);
+
+class relay_socket;
+static relay_socket *rs = NULL;
+
 class relay_socket : public connection
 {
 private:
@@ -220,6 +259,11 @@ private:
 	
 	// source -> connection map
 	typedef std::map<endpoint, connection*>::iterator con_iter;
+
+	// statistics collection
+	int n_past_connections;
+	uint64 total_past_bytes_sent;     // sum of bytes sent on prior, now _closed_, connections
+	uint64 total_past_bytes_received; // sum of bytes received on prior, now _closed_, connections
 
 protected:
 	int build_fdset(fd_set &set)
@@ -229,7 +273,6 @@ protected:
 		int max_socket = 0;
 		FOREACH(connections)
 		{
-//			std::cerr << "XX " << i->second->sock << "\n";
 			FD_SET(i->second->sock, &set);
 			if(max_socket < i->second->sock) { max_socket = i->second->sock; }
 		}
@@ -246,7 +289,8 @@ protected:
 	}
 
 public:
-	relay_socket() : connection()
+	relay_socket()
+		: connection(), should_gc(true), ctrlc(false), n_past_connections(0), total_past_bytes_sent(0), total_past_bytes_received(0)
 	{
 	}
 
@@ -271,15 +315,63 @@ public:
 		return conn;
 	}
 
+	std::ofstream logstrm;
+	bool open_log_stream(const std::string &fn)
+	{
+		logstrm.open(fn.c_str(), std::ios::app);
+//		logstrm.rdbuf()->pubsetbuf(0, 0); // unbuffered logging
+		logstrm << std::unitbuf; // unbuffered logging
+		return logstrm.good();
+	}
+	
+	std::ostream &log()
+	{
+		//return std::cerr << "[" << timestamp() << "] ";
+		return logstrm << "[" << timestamp() << "] ";
+	}
+
 	connection *open_connection(const endpoint &source)
 	{
-		// TODO: implement garbage collection
-//		std::cerr << "Opening new connection.\n";
-
 		std::auto_ptr<connection> rcon(new connection(this));
 		if(!rcon->initialize(dest, source)) { return NULL; }
 
-		return add_to_socket_lists(rcon.release());
+		log() << "New: " << rcon->stats() << "\n";
+
+		connection *conn = rcon.release();
+		add_to_socket_lists(conn);
+
+		update_status();
+		return conn;
+	}
+
+	void drop_connection(const endpoint &e)
+	{
+		connection *c = connections[e];
+		log() << "Dropping: " << c->stats() << "\n";
+		
+		total_past_bytes_received += c->total_received;
+		total_past_bytes_sent += c->total_sent;
+		n_past_connections++;
+
+		connections.erase(e);
+		delete c;
+
+		update_status();
+	}
+
+	void shutdown()
+	{
+		while(!connections.empty())
+		{
+			if(connections.begin()->second == this)
+			{
+				connections.erase(connections.begin());
+			}
+			else
+			{
+				drop_connection(connections.begin()->first);
+			}
+		}
 	}
 
 	void print_statistics()
@@ -290,54 +382,225 @@ public:
 		}
 	}
 
-	int listen()
+	std::string timestamp()
 	{
+		time_t t = time(NULL);
+		std::string s = ctime(&t);
+		return s.substr(0, s.size()-1);
+	}
+
+	double calc_v(uint64 ds, time_t dt)
+	{
+		return (double)ds / (double)dt;
+	}
+
+	void update_status(bool log = false)
+	{
+		std::ofstream out(status_file.c_str());
+
+		out << timestamp() << "\n";
+		out << "Listening on port " << sock_port << ", forwarding to " << dest.getHost() << ":" << dest.getPort() << ", pid=" << getpid() << "\n";
+		out << n_past_connections << " past connections, " <<  connections.size()-1 << " active connections.\n\n";
+
+		out << "Server: " << stats() << "\n\n";
+
+		FOREACH(connections)
+		{
+			if(i->second == this) continue;
+
+			out << i->second->stats() << "\n";
+		}
+
+		uint64 total_sent = total_past_bytes_sent;
+		uint64 total_received = total_past_bytes_received;
+		FOREACH(connections)
+		{
+			total_sent += i->second->total_sent;
+			total_received += i->second->total_received;
+		}
+
+		out << "\n";
+		time_t ut = time(NULL) - time_of_start;
+		out << "Uptime:          " << ut << " seconds\n";
+		out << "Total received:  " << total_received << " bytes\n";
+		out << "Total sent:      " << total_sent << " bytes\n";
+
+		// calculate transfer rates
+		static uint64 last_in = 0, last_out = 0, last_t = 0;
+		time_t now = time(NULL);
+		if(last_t)
+		{
+			double vin = calc_v(total_received - last_in, now - last_t) / 1024.;
+			double vout = calc_v(total_sent - last_out, now - last_t) / 1024.;
+			out << "\nTransfer rates in the past " << now - last_t << " seconds: "
+				<< std::setw(4) << vin << "KB/s in, "
+				<< std::setw(4) << vout << "KB/s out.\n";
+		}
+		last_in = total_received; last_out = total_sent; last_t = now;
+
+		if(log)
+		{
+			// transfer rates in gc_interval interval
+			std::stringstream ss;
+			static uint64 last_in = 0, last_out = 0, last_t = 0;
+			if(last_t)
+			{
+				double vin = calc_v(total_received - last_in, now - last_t) / 1024.;
+				double vout = calc_v(total_sent - last_out, now - last_t) / 1024.;
+				ss << ", "
+					<< std::setw(4) << vin << "KB/s in, "
+					<< std::setw(4) << vout << "KB/s out";
+			}
+			last_in = total_received; last_out = total_sent; last_t = now;
+
+			this->log() << "Uptime " << ut << "s, " << connections.size()-1 << " connections, "
+				<< total_received << "B in, " << total_sent << "B out"
+				<< ss.str() << "\n";
+		}
+	}
+
+	bool should_gc;
+	void garbage_collect()
+	{
+		should_gc = false;
+
+		std::vector<endpoint> to_delete;
+		FOREACH(connections)
+		{
+			if(!i->second->clear_dirty() && i->second->proxy != NULL)
+			{
+				to_delete.push_back(i->first);
+			}
+		}
+
+		FOREACH(to_delete)
+		{
+			drop_connection(*i);
+		}
+
+		update_status(true);
+
+//		print_statistics();
+	}
+
+	int setup()
+	{
+		if(!open_log_stream(log_file))
+		{
+			std::cerr << "Cannot open log file " << log_file << " for appending. Exiting.\n";
+			return -1;
+		}
+
+		log() << "Starting UDP relay, pid=" << getpid() << "\n";
+		log() << "Relaying from " << sock_port << " to " << dest.getHost() << ":" << dest.getPort() << "\n";
+
+		rs = this;
 		add_to_socket_lists(this);
 
+		if(signal(SIGINT, ctrlc_signal_handler))
+		{
+			log() << "Could not set the SIGINT signal handler. Exiting.\n";
+			return -1;
+		}
 
+		if(signal(SIGALRM, timer_signal_handler) == SIG_ERR)
+		{
+			log() << "Could not set the SIGALRM signal handler. Exiting.\n";
+			return -1;
+		}
+
+		itimerval itv = { { gc_interval, 0 }, { gc_interval, 0 } };
+		if(setitimer(ITIMER_REAL, &itv, NULL) != 0)
+		{
+			log() << "Could not create garbage-collection timer. Exiting.\n";
+			return -1;
+		}
+		return 0;
+	}
+
+	bool ctrlc;
+	int listen()
+	{
+		// setup garbage collector, etc.
+		int ret = setup();
+		if(ret != 0) { return ret; }
+
+		timeval to = {shutdown_interval, 0}, timeout = to; // timeout (in seconds, miliseconds)
 		// block on sockets list until a packet is received
 		fd_set set;
-		for(;;)
+		time_t last_statistics = 0;
+		int nset = -1;
+		while(nset != 0 && !ctrlc)
 		{
-//			reset_all_traffic_counters();
+			if(should_gc) { garbage_collect(); }
 
-			timeval timeout = {20, 0}; // timeout (in seconds, miliseconds)
 			int max_socket = build_fdset(set);
+			nset = select(max_socket+1, &set, NULL, NULL, shutdown_interval == 0 ? NULL : &timeout);
+			if(nset < 0)
+			{
+				//std::cerr << timeout.tv_sec << "|" << timeout.tv_usec << "\n";
+				if(errno == EINTR) { continue; } // the timer has fired
+				break;
+			}
 
-			int nset = select(max_socket+1, &set, NULL, NULL, &timeout);
-			if(nset < 0) break;
-
-//			std::cerr << "nset=" << nset << " " << timeout.tv_sec << "|" << timeout.tv_usec << " ";
-//			std::cerr << "nset=" << nset << " ";
 			if(nset)
 			{
 				FOREACH(connections)
 				{
 					if(FD_ISSET(i->second->sock, &set))
 					{
-//						std::cerr << "Triggered " << i->second->sock << ".\n";
-//						goto endd;
 						i->second->receive();
-//						std::cerr << "Done receiving.\n";
 					}
 				}
 			}
-
-			print_statistics();
+			
+			timeout = to;
 		}
-endd:
-		return 0;
+
+		if(ctrlc)
+		{
+			log() << "Received an interrupt signal (SIGINT). Shutting down.\n";
+			return 0;
+		}
+
+		if(nset == 0)
+		{
+			log() << "No activity for shutdown_interval (" << shutdown_interval << " seconds). Shutting down.\n";
+			return 0;
+		}
+
+		if(nset < 0)
+		{
+			log() << "Error while doing select(): " << strerror(errno) << ". Exiting abnormally.\n";
+			return -1;
+		}
+
+		return -1;
 	}
 
 	~relay_socket()
 	{
-		FOREACH(connections)
+		shutdown();
+/*		FOREACH(connections)
 		{
 			if(i->second == this) continue;
 			delete i->second;
-		}
+		}*/
 	}
 };
+
+void timer_signal_handler(int sig)
+{
+	if(!rs) return;
+	rs->should_gc = true;
+}
+
+void ctrlc_signal_handler(int sig)
+{
+	if(!rs) return;
+	rs->ctrlc = true;
+	//(void) signal(SIGINT, SIG_DFL);
+}
 
 int main(int argc, char **argv)
 {
@@ -350,7 +613,6 @@ int main(int argc, char **argv)
 	std::string dest_ip = argv[1];
 	uint16_t dest_port = atoi(argv[2]);
 	uint16_t listen_port = atoi(argv[3]);
-	std::cerr << "Forwarding UDP packets received at port " << listen_port << " to " << dest_ip << ":" << dest_port << "\n";
 
 	// Create socket on which we'll listen for incoming packets
 	relay_socket relay;

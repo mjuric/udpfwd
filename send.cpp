@@ -69,7 +69,7 @@ int main(int argc, char **argv)
 		// Send the datagram
 		char buffer[30000] = {0};
 		strcpy(buffer, msg.c_str());
-		int NSEND = 18000; //msg.size()+1;
+		int NSEND = msg.size()+1;
 		int sent = sendto(server_s, buffer, NSEND, 0, (sockaddr *)&dest_addr, sizeof(dest_addr));
 		//std::cerr << "Sent " << sent << " bytes to " << dest_ip << ":" << dest_port << " from 0.0.0.0:" << ntohs(server_addr.sin_port) << "\n";
 		std::cerr << "To " << dest_ip << ":" << dest_port << " from 0.0.0.0:" << ntohs(server_addr.sin_port) << "\n";

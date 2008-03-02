@@ -29,10 +29,10 @@ typedef unsigned long long uint64;
 
 int gc_interval = 60; // connection _may_ be dropped if there was no activity within gc_interval,
 		      // and _will_ be dropped if there was no activity within 2*gc_interval
-std::string status_file = "status.txt";	// status file -- will be updated every gc_interval seconds with status info
-std::string log_file = "log.txt"; // log file
+std::string status_file = "log/status.txt";	// status file -- will be updated every gc_interval seconds with status info
+std::string log_file = "log/log.txt"; // log file
 
-int shutdown_interval = 120; // shutdown if there's no activity in shutdown_interval seconds (set to 0 to disable)
+int shutdown_interval = 0; // shutdown if there's no activity in shutdown_interval seconds (set to 0 to disable)
 
 time_t time_of_start = time(NULL);
 
@@ -160,8 +160,9 @@ public:
 			}
 			total_received += succ;
 			touch();
+////			std::cerr << "Size=" << succ << "";
 //			std::cerr << " Packet: " << succ << " Message = '" << buffer << "'\n";
-//			std::cerr << "   From: " << inet_ntoa(from_tmp.addr.sin_addr) << ":" << (int)ntohs(from_tmp.addr.sin_port) << "\n";
+////			std::cerr << "   From: " << inet_ntoa(from_tmp.addr.sin_addr) << ":" << (int)ntohs(from_tmp.addr.sin_port) << "\n";
 			
 			if(!forward(buffer, succ, &from_tmp)) return false;
 		}

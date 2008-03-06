@@ -1,6 +1,7 @@
 all: reflect send udpfwd
 
 udpfwd: udpfwd.cpp common.cpp
+	$(CXX) $(CXXFLAGS) $? $(LDFLAGS) -o $@
 
 reflect: reflect.cpp common.cpp
 	$(CXX) $(CXXFLAGS) $? $(LDFLAGS) -o $@

@@ -32,6 +32,7 @@ This relay has no authentication or authorization mechanisms, nor
 does it in any way obscure or encrypt the forwarded packets. You
 have been warned.
 
+
 Building and Installing
 =======================
 
@@ -42,5 +43,62 @@ A simple
 should do. Then copy the executable `udpfwd' to wherever you like (e.g.,
 /usr/local/bin).
 
-Othe tools
-==========
+
+Logging
+=======
+
+A connection log and status file will be created in subdirectory 'log' of
+the directory from which you start udpfwd. If this subdirectory does not
+exist, or the log file cannot be written for any reason, logging will be
+disabled.
+
+If you want to tweak logging-related settings, edit the top of udpfwd.cpp
+and recompile.
+
+
+Where is this useful
+====================
+
+Wherever you don't have control over kernel-level routing/forwarding. For
+example, when attempting to set up an OpenVPN tunnel on an OpenVZ VPS where
+the hosting company disallows access to IP forwarding (I'll let you figure
+out the details :-)).
+
+
+Testing
+=======
+
+Two other tools are included in the package, mainly to make the testing
+easier. They are:
+
+	./reflect <port_to_listen_on>
+
+		UDP packet reflector -- returns received packets to the
+		sender
+
+	./send <dest_ip> <dest_port> <source_port> [seconds_between_packets=1]
+
+		Sends a stream of UDP packets to dest_ip:dest_port. UDP
+		packets are sent from source_port. When a packet is sent,
+		waits for 1 second for a reply. After receiving the reply
+		(or after 1 second expires), waits for
+		seconds_between_packets seconds and repeats.
+
+You may use these to test the relay. E.g.
+
+	Host A:  ./relay   Host_B 5000 4999
+	Host B:  ./reflect 5000
+	Host C:  ./send    Host_A 4999 6000
+
+In the example above, ./send (executed on Host_C) will send packets from port
+6000 to Host_A's port 4999. ./relay will forward these to Host_C's port
+5000. These will be reflected by ./reflect and passed back through the relay
+to ./send.
+
+
+License and Warranty
+====================
+Author: Mario Juric <mjuric@ias.edu>
+
+This software is provided “as is” without express or implied warranty,
+distributed under the GNU General Public License, Version 2.

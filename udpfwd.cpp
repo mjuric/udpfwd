@@ -473,8 +473,7 @@ public:
 	{
 		if(!open_log_stream(log_file))
 		{
-			std::cerr << "Cannot open log file " << log_file << " for appending. Exiting.\n";
-			return -1;
+			std::cerr << "Cannot open log file " << log_file << " for appending. Make sure the subdirectory 'log' exists (see the README file for details). Logging and status reporting disabled.\n";
 		}
 
 		log() << "Starting UDP relay, pid=" << getpid() << "\n";

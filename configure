@@ -1,0 +1,6 @@
+#!/bin/bash
+
+echo "  Configured."
+echo "  Run 'make', then copy the ./udpfwd executable to wherever you prefer."
+echo
+echo "  Make sure to read the README for usage instructions!"

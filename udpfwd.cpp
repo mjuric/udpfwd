@@ -23,33 +23,9 @@
 
 	Usage:
 
-		./relay <dest_ip> <dest_port> <listen_port>
+		./udpfwd <dest_ip> <dest_port> <listen_port>
 
-	The relay listens for packets received on listen_port, changes their source
-	IPs to the IP of the local host ("SNAT"), and forwards them to the
-	destination (dest_ip:dest_port) from a randomly chosen local send_port. The
-	selection of send_port is made on reception of the first packet from a given
-	source_ip:source_port; once chosen, the source_ip:source_port:send_port
-	triplet is unique, allowing for connection tracking. Therefore, when a
-	packet is received on send_port, its destination is changed to
-	source_ip:source_port ("DNAT"), and forwarded onwards.
-
-	Effectively, this is a userspace SNAT/DNAT.
-
-	Schematic:
-
-	                        +----------------+
-	[host_a:xxxx] <-------> |          a_out:| --------> [                   ]
-	[host_b:yyyy] <-------> |:listen   b_out:| --------> [ dest_ip:dest_port ]
-	[host_c:zzzz] <-------> |          c_out:| --------> [                   ]
-	                        +----------------+
-
-	Warnings:
-	
-	This relay has no authentication or authorization mechanisms, nor
-	does it in any way obscure or encrypt the forwarded packets. You
-	have been warned.
-
+	See README for more detailed instructions.
 */
 
 #include <arpa/inet.h>

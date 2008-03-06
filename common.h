@@ -8,5 +8,6 @@
 #define FOREACH(x) FOREACHj(i, x)
 
 in_addr_t gethostbyname_or_die(const std::string &host);
+std::string str_interval(time_t dt);
 
 #endif

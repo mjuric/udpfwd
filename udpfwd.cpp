@@ -409,7 +409,7 @@ public:
 
 		out << "\n";
 		time_t ut = time(NULL) - time_of_start;
-		out << "Uptime:          " << ut << " seconds\n";
+		out << "Uptime:          " << str_interval(ut) << "\n";
 		out << "Total received:  " << total_received << " bytes\n";
 		out << "Total sent:      " << total_sent << " bytes\n";
 

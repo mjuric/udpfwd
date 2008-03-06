@@ -20,6 +20,36 @@
 
 /*
 	Userspace UDP relay. Think of it as poor man's single-port UDP DNAT/SNAT.
+
+	Usage:
+
+		./relay <dest_ip> <dest_port> <listen_port>
+
+	The relay listens for packets received on listen_port, changes their source
+	IPs to the IP of the local host ("SNAT"), and forwards them to the
+	destination (dest_ip:dest_port) from a randomly chosen local send_port. The
+	selection of send_port is made on reception of the first packet from a given
+	source_ip:source_port; once chosen, the source_ip:source_port:send_port
+	triplet is unique, allowing for connection tracking. Therefore, when a
+	packet is received on send_port, its destination is changed to
+	source_ip:source_port ("DNAT"), and forwarded onwards.
+
+	Effectively, this is a userspace SNAT/DNAT.
+
+	Schematic:
+
+	                        +----------------+
+	[host_a:xxxx] <-------> |          a_out:| --------> [                   ]
+	[host_b:yyyy] <-------> |:listen   b_out:| --------> [ dest_ip:dest_port ]
+	[host_c:zzzz] <-------> |          c_out:| --------> [                   ]
+	                        +----------------+
+
+	Warnings:
+	
+	This relay has no authentication or authorization mechanisms, nor
+	does it in any way obscure or encrypt the forwarded packets. You
+	have been warned.
+
 */
 
 #include <arpa/inet.h>
@@ -27,6 +57,7 @@
 #include <sys/time.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <netdb.h>
 
 #include <iostream>
 #include <string>
@@ -36,8 +67,11 @@
 #include <map>
 #include <vector>
 
-#define FOREACHj(i_, x) for(typeof((x).begin()) i_ = (x).begin(); i_ != (x).end(); ++i_)
-#define FOREACH(x) FOREACHj(i, x)
+#include "common.h"
+
+//
+// Settings
+//
 
 int shutdown_interval 	= 0;	// shutdown if there's no activity in shutdown_interval seconds (set to 0 to disable)
 int gc_interval		= 60; 	// connection _may_ be dropped if there was no activity within gc_interval,
@@ -49,21 +83,23 @@ time_t time_of_start = time(NULL);
 
 const int port_base	= 6000; // base from which outgoing port will be assigned
 
-unsigned int bind_socket(unsigned short &base)
+// Allocate and bind socket to a port. If port=0, randomly assign it and
+// return in the argument.
+unsigned int bind_socket(unsigned short &port)
 {
-	bool find_available = base == 0;
-	if(find_available) { base = port_base; }
+	bool find_available = port == 0;
+	if(find_available) { port = port_base; }
 
-	unsigned short last = base + 5000;
+	unsigned short last = port + 5000;
 	sockaddr_in sockaddr;
 	sockaddr.sin_family = AF_INET;
 	sockaddr.sin_addr.s_addr = htonl(INADDR_ANY);
 
 	unsigned int s = socket(AF_INET, SOCK_DGRAM, 0);
 
-	while(base < last)
+	while(port < last)
 	{
-		sockaddr.sin_port = htons(base);
+		sockaddr.sin_port = htons(port);
 		int succ = bind(s, (struct sockaddr *)&sockaddr, sizeof(sockaddr));
 		if(succ == 0)	// found and bound a free port
 		{
@@ -74,7 +110,7 @@ unsigned int bind_socket(unsigned short &base)
 
 		if(!find_available || errno != EADDRINUSE) { return 0; }
 
-		++base;
+		++port;
 	}
 	return 0;	// failed to find a free port
 }
@@ -88,16 +124,9 @@ public:
 
 	endpoint(const std::string &host = "0.0.0.0", uint16_t port = 0)
 	{
-#if 0
-		hostent *he = gethostbyname(host.c_str());
-		if(he)
-		{
-			addr.sin_addr.s_addr = ((in_addr*)(he -> h_addr_list[0]))->s_addr;
-		}
-#endif
+		addr.sin_addr.s_addr = gethostbyname_or_die(host);
 		addr.sin_family = AF_INET;
 		addr.sin_port = htons(port);
-		addr.sin_addr.s_addr = inet_addr(host.c_str());
 	}
 	endpoint(const endpoint &r) : addr(r.addr) {}
 

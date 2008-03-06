@@ -25,6 +25,8 @@
 #include <string>
 #include <sstream>
 
+#include "common.h"
+
 int main(int argc, char **argv)
 {
 	if(argc != 4 && argc != 5)
@@ -56,7 +58,7 @@ int main(int argc, char **argv)
 	sockaddr_in dest_addr;
 	dest_addr.sin_family = AF_INET;
 	dest_addr.sin_port = htons(dest_port);
-	dest_addr.sin_addr.s_addr = inet_addr(dest_ip.c_str());
+	dest_addr.sin_addr.s_addr = gethostbyname_or_die(dest_ip.c_str());
 
 	int npacket = 0, no_resp = 0, resp = 0; // number of packets sent, responses missed, responses received
 	while(true)

@@ -25,7 +25,7 @@
 
 		./udpfwd <dest_ip> <dest_port> <listen_port>
 
-	See README for more detailed instructions.
+	See README for more details.
 */
 
 #include <arpa/inet.h>
@@ -42,6 +42,7 @@
 #include <fstream>
 #include <map>
 #include <vector>
+#include <list>
 
 #include "common.h"
 
@@ -263,7 +264,8 @@ protected:
 	{
 		FD_ZERO(&set);
 
-		int max_socket = 0;
+		FD_SET(sock, &set);
+		int max_socket = sock;
 		FOREACH(connections)
 		{
 			FD_SET(i->second->sock, &set);
@@ -275,6 +277,7 @@ protected:
 
 	void reset_all_traffic_counters()
 	{
+		reset_traffic_counters();
 		FOREACH(connections)
 		{
 			i->second->reset_traffic_counters();
@@ -299,12 +302,6 @@ public:
 		return rcon->send(buffer, len);
 	}
 
-	connection *add_to_socket_lists(connection *conn)
-	{
-		connections[conn->source] = conn;
-		return conn;
-	}
-
 	std::ofstream logstrm;
 	bool open_log_stream(const std::string &fn)
 	{
@@ -326,7 +323,7 @@ public:
 		log() << "New: " << rcon->stats() << "\n";
 
 		connection *conn = rcon.release();
-		add_to_socket_lists(conn);
+		connections[conn->source] = conn;
 
 		update_status();
 		return conn;
@@ -341,6 +338,11 @@ public:
 		total_past_bytes_sent += c->total_sent;
 		n_past_connections++;
 
+		std::stringstream ss;
+		ss << "  [" << timestamp() << "] " << c->stats();
+		lastlog.push_front(ss.str());
+		if(lastlog.size() > 10) { lastlog.pop_back(); }
+
 		connections.erase(e);
 		delete c;
 
@@ -351,22 +353,7 @@ public:
 	{
 		while(!connections.empty())
 		{
-			if(connections.begin()->second == this)
-			{
-				connections.erase(connections.begin());
-			}
-			else
-			{
-				drop_connection(connections.begin()->first);
-			}
-		}
-	}
-
-	void print_statistics()
-	{
-		FOREACH(connections)
-		{
-			std::cerr << i->second->stats() << "\n";
+			drop_connection(connections.begin()->first);
 		}
 	}
 
@@ -379,28 +366,27 @@ public:
 
 	double calc_v(uint64_t ds, time_t dt)
 	{
-		return (double)ds / (double)dt;
+		return dt ? (double)ds / (double)dt : 0;
 	}
 
+	std::list<std::string> lastlog;
 	void update_status(bool log = false)
 	{
 		std::ofstream out(status_file.c_str());
 
-		out << timestamp() << "\n";
+		time_t ut = time(NULL) - time_of_start;
+		out << timestamp() << ", Up for " << str_interval(ut) << "\n";
 		out << "Listening on port " << sock_port << ", forwarding to " << dest.getHost() << ":" << dest.getPort() << ", pid=" << getpid() << "\n";
-		out << n_past_connections << " past connections, " <<  connections.size()-1 << " active connections.\n\n";
+		out << n_past_connections << " past connections, " <<  connections.size() << " active connections.\n\n";
 
-		out << "Server: " << stats() << "\n\n";
-
+		out << "Server: " << stats() << "\n";
 		FOREACH(connections)
 		{
-			if(i->second == this) continue;
-
 			out << i->second->stats() << "\n";
 		}
 
-		uint64_t total_sent = total_past_bytes_sent;
-		uint64_t total_received = total_past_bytes_received;
+		uint64_t total_sent = total_past_bytes_sent + this->total_sent;
+		uint64_t total_received = total_past_bytes_received + this->total_received;
 		FOREACH(connections)
 		{
 			total_sent += i->second->total_sent;
@@ -408,8 +394,6 @@ public:
 		}
 
 		out << "\n";
-		time_t ut = time(NULL) - time_of_start;
-		out << "Uptime:          " << str_interval(ut) << "\n";
 		out << "Total received:  " << total_received << " bytes\n";
 		out << "Total sent:      " << total_sent << " bytes\n";
 
@@ -421,8 +405,8 @@ public:
 			double vin = calc_v(total_received - last_in, now - last_t) / 1024.;
 			double vout = calc_v(total_sent - last_out, now - last_t) / 1024.;
 			out << "\nTransfer rates in the past " << now - last_t << " seconds: "
-				<< std::setw(4) << vin << "KB/s in, "
-				<< std::setw(4) << vout << "KB/s out.\n";
+				<< std::fixed << std::setprecision(0) << vin << "KB/s in, "
+				<< std::fixed << std::setprecision(0) << vout << "KB/s out.\n";
 		}
 		last_in = total_received; last_out = total_sent; last_t = now;
 
@@ -441,10 +425,13 @@ public:
 			}
 			last_in = total_received; last_out = total_sent; last_t = now;
 
-			this->log() << "Uptime " << ut << "s, " << connections.size()-1 << " connections, "
+			this->log() << "Uptime " << ut << "s, " << connections.size() << " connections, "
 				<< total_received << "B in, " << total_sent << "B out"
 				<< ss.str() << "\n";
 		}
+		
+		out << "\n\nLast 10 connections:\n";
+		FOREACH(lastlog) { out << *i << "\n"; }
 	}
 
 	bool should_gc;
@@ -480,7 +467,6 @@ public:
 		log() << "Relaying from " << sock_port << " to " << dest.getHost() << ":" << dest.getPort() << "\n";
 
 		rs = this;
-		add_to_socket_lists(this);
 
 		if(signal(SIGINT, ctrlc_signal_handler))
 		{
@@ -529,6 +515,7 @@ public:
 
 			if(nset)
 			{
+				if(FD_ISSET(sock, &set)) { receive(); }
 				FOREACH(connections)
 				{
 					if(FD_ISSET(i->second->sock, &set))

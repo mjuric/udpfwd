@@ -1,47 +1,58 @@
+/***************************************************************************
+ *   Copyright (C) 2008 by Mario Juric                                     *
+ *   mjuric@ias.edu                                                        *
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ *   This program is distributed in the hope that it will be useful,       *
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
+ *   GNU General Public License for more details.                          *
+ *                                                                         *
+ *   You should have received a copy of the GNU General Public License     *
+ *   along with this program; if not, write to the                         *
+ *   Free Software Foundation, Inc.,                                       *
+ *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
+ ***************************************************************************/
+
 /*
 	Userspace UDP relay. Think of it as poor man's single-port UDP DNAT/SNAT.
 */
 
-#include <stdio.h>          // Needed for printf()
-#include <stdlib.h>         // Needed for memcpy()
-#include <string.h>         // Needed for strcpy()
-
-#include <sys/types.h>    // Needed for system defined identifiers.
-#include <netinet/in.h>   // Needed for internet address structure.
-#include <sys/socket.h>   // Needed for socket(), bind(), etc...
-#include <arpa/inet.h>    // Needed for inet_ntoa()
+#include <arpa/inet.h>
+#include <errno.h>
 #include <sys/time.h>
 #include <fcntl.h>
-#include <netdb.h>
-#include <unistd.h>
-#include <errno.h>
 #include <signal.h>
 
 #include <iostream>
-#include <iomanip>
-#include <fstream>
 #include <string>
 #include <sstream>
+#include <iomanip>
+#include <fstream>
 #include <map>
 #include <vector>
 
-typedef unsigned long long uint64;
+#define FOREACHj(i_, x) for(typeof((x).begin()) i_ = (x).begin(); i_ != (x).end(); ++i_)
+#define FOREACH(x) FOREACHj(i, x)
 
-int gc_interval = 60; // connection _may_ be dropped if there was no activity within gc_interval,
-		      // and _will_ be dropped if there was no activity within 2*gc_interval
+int shutdown_interval 	= 0;	// shutdown if there's no activity in shutdown_interval seconds (set to 0 to disable)
+int gc_interval		= 60; 	// connection _may_ be dropped if there was no activity within gc_interval,
+		      		// and _will_ be dropped if there was no activity within 2*gc_interval
 std::string status_file = "log/status.txt";	// status file -- will be updated every gc_interval seconds with status info
-std::string log_file = "log/log.txt"; // log file
-
-int shutdown_interval = 0; // shutdown if there's no activity in shutdown_interval seconds (set to 0 to disable)
+std::string log_file    = "log/log.txt";	// log file
 
 time_t time_of_start = time(NULL);
 
+const int port_base	= 6000; // base from which outgoing port will be assigned
+
 unsigned int bind_socket(unsigned short &base)
 {
-#define BASE 6000
-
 	bool find_available = base == 0;
-	if(find_available) { base = BASE; }
+	if(find_available) { base = port_base; }
 
 	unsigned short last = base + 5000;
 	sockaddr_in sockaddr;
@@ -49,7 +60,6 @@ unsigned int bind_socket(unsigned short &base)
 	sockaddr.sin_addr.s_addr = htonl(INADDR_ANY);
 
 	unsigned int s = socket(AF_INET, SOCK_DGRAM, 0);
-	// TODO: see how to flag the socket O_NONBLOCK;
 
 	while(base < last)
 	{
@@ -88,7 +98,6 @@ public:
 		addr.sin_family = AF_INET;
 		addr.sin_port = htons(port);
 		addr.sin_addr.s_addr = inet_addr(host.c_str());
-////		std::cerr << "HHH: " << host << " : " << getHost() << "\n";
 	}
 	endpoint(const endpoint &r) : addr(r.addr) {}
 
@@ -110,8 +119,8 @@ protected:
 	void touch() { dirty = true; }
 
 public:
-	uint64 total_received;	// bytes received
-	uint64 total_sent;	// bytes sent
+	uint64_t total_received;// bytes received
+	uint64_t total_sent;	// bytes sent
 
 	endpoint dest;		// destination for this socket (intranet side)
 	endpoint source;	// source for this socket (internet side)
@@ -136,8 +145,6 @@ public:
 		sock = bind_socket(sock_port);
 		touch();
 
-//		std::cerr << "dest=" << dest.getHost() << ":" << dest.getPort() << ", listening_on=" << sock_port << "\n";
-//		std::cerr << stats() << "\n";
 		return sock != 0;
 	}
 
@@ -160,9 +167,6 @@ public:
 			}
 			total_received += succ;
 			touch();
-////			std::cerr << "Size=" << succ << "";
-//			std::cerr << " Packet: " << succ << " Message = '" << buffer << "'\n";
-////			std::cerr << "   From: " << inet_ntoa(from_tmp.addr.sin_addr) << ":" << (int)ntohs(from_tmp.addr.sin_port) << "\n";
 			
 			if(!forward(buffer, succ, &from_tmp)) return false;
 		}
@@ -183,13 +187,8 @@ public:
 		// send a packet through this socket to the destination dest,
 		// or the default destination (intranet side endpoint)
 		if(!dest) { dest = &this->dest; }
-//		std::cerr << "DDD"  << "dest=" << dest << " "
-//		                   << (std::string)inet_ntoa(dest->addr.sin_addr) << ":" << (int)ntohs(dest->addr.sin_port)
-//					<< this->dest.getHost()
-//		                   ;
 		ssize_t succ = sendto(sock, buffer, len, 0, (struct sockaddr *)&dest->addr, sizeof(dest->addr));
 		if(succ != -1) { total_sent += succ; }
-//		std::cerr << "Out!\n";
 		touch();
 		return succ != -1;
 	}
@@ -203,15 +202,6 @@ public:
 	std::string stats()
 	{
 		std::ostringstream ss;
-#if 0
-		ss << "source="
-		   << (std::string)inet_ntoa(source.addr.sin_addr) << ":" << (int)ntohs(source.addr.sin_port) << "  -->  "
-		   << ":" << sock_port << " --> "
-		   << "dest="
-		   << (std::string)inet_ntoa(dest.addr.sin_addr) << ":" << (int)ntohs(dest.addr.sin_port)
-		   << " via proxy=" << (proxy ? proxy->stats() : "NULL")
-		   ;
-#endif
 		if(!proxy) {
 			ss
 			   << (std::string)inet_ntoa(source.addr.sin_addr) << ":" << (int)ntohs(source.addr.sin_port)
@@ -235,9 +225,6 @@ public:
 		return ss.str();
 	}
 };
-
-#define FOREACHj(i_, x) for(typeof((x).begin()) i_ = (x).begin(); i_ != (x).end(); ++i_)
-#define FOREACH(x) FOREACHj(i, x)
 
 struct connection_less
 {
@@ -263,8 +250,8 @@ private:
 
 	// statistics collection
 	int n_past_connections;
-	uint64 total_past_bytes_sent;     // sum of bytes sent on prior, now _closed_, connections
-	uint64 total_past_bytes_received; // sum of bytes received on prior, now _closed_, connections
+	uint64_t total_past_bytes_sent;     // sum of bytes sent on prior, now _closed_, connections
+	uint64_t total_past_bytes_received; // sum of bytes received on prior, now _closed_, connections
 
 protected:
 	int build_fdset(fd_set &set)
@@ -304,15 +291,12 @@ public:
 		if(!rcon) return false;
 
 		// forward the packet
-//		std::cerr << "Going to send... " << rcon << " " << buffer << " " << len << "\n";
 		return rcon->send(buffer, len);
 	}
 
 	connection *add_to_socket_lists(connection *conn)
 	{
 		connections[conn->source] = conn;
-//		std::cerr << "Number of open connections: " << connections.size() << "\n";
-//		std::cerr << "dest = " << conn->dest.getHost() << "\n";
 		return conn;
 	}
 
@@ -320,14 +304,12 @@ public:
 	bool open_log_stream(const std::string &fn)
 	{
 		logstrm.open(fn.c_str(), std::ios::app);
-//		logstrm.rdbuf()->pubsetbuf(0, 0); // unbuffered logging
 		logstrm << std::unitbuf; // unbuffered logging
 		return logstrm.good();
 	}
 	
 	std::ostream &log()
 	{
-		//return std::cerr << "[" << timestamp() << "] ";
 		return logstrm << "[" << timestamp() << "] ";
 	}
 
@@ -390,7 +372,7 @@ public:
 		return s.substr(0, s.size()-1);
 	}
 
-	double calc_v(uint64 ds, time_t dt)
+	double calc_v(uint64_t ds, time_t dt)
 	{
 		return (double)ds / (double)dt;
 	}
@@ -412,8 +394,8 @@ public:
 			out << i->second->stats() << "\n";
 		}
 
-		uint64 total_sent = total_past_bytes_sent;
-		uint64 total_received = total_past_bytes_received;
+		uint64_t total_sent = total_past_bytes_sent;
+		uint64_t total_received = total_past_bytes_received;
 		FOREACH(connections)
 		{
 			total_sent += i->second->total_sent;
@@ -427,7 +409,7 @@ public:
 		out << "Total sent:      " << total_sent << " bytes\n";
 
 		// calculate transfer rates
-		static uint64 last_in = 0, last_out = 0, last_t = 0;
+		static uint64_t last_in = 0, last_out = 0, last_t = 0;
 		time_t now = time(NULL);
 		if(last_t)
 		{
@@ -443,7 +425,7 @@ public:
 		{
 			// transfer rates in gc_interval interval
 			std::stringstream ss;
-			static uint64 last_in = 0, last_out = 0, last_t = 0;
+			static uint64_t last_in = 0, last_out = 0, last_t = 0;
 			if(last_t)
 			{
 				double vin = calc_v(total_received - last_in, now - last_t) / 1024.;
@@ -480,8 +462,6 @@ public:
 		}
 
 		update_status(true);
-
-//		print_statistics();
 	}
 
 	int setup()
@@ -539,7 +519,6 @@ public:
 			nset = select(max_socket+1, &set, NULL, NULL, shutdown_interval == 0 ? NULL : &timeout);
 			if(nset < 0)
 			{
-				//std::cerr << timeout.tv_sec << "|" << timeout.tv_usec << "\n";
 				if(errno == EINTR) { continue; } // the timer has fired
 				break;
 			}
@@ -582,11 +561,6 @@ public:
 	~relay_socket()
 	{
 		shutdown();
-/*		FOREACH(connections)
-		{
-			if(i->second == this) continue;
-			delete i->second;
-		}*/
 	}
 };
 
@@ -600,7 +574,6 @@ void ctrlc_signal_handler(int sig)
 {
 	if(!rs) return;
 	rs->ctrlc = true;
-	//(void) signal(SIGINT, SIG_DFL);
 }
 
 int main(int argc, char **argv)

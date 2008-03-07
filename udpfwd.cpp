@@ -210,21 +210,24 @@ public:
 		std::ostringstream ss;
 		if(!proxy) {
 			ss
-			   << (std::string)inet_ntoa(source.addr.sin_addr) << ":" << (int)ntohs(source.addr.sin_port)
-			   << "  <-->  ["
-			   << sock_port
-			   << "]  <--> "
-			   << (std::string)inet_ntoa(dest.addr.sin_addr) << ":" << (int)ntohs(dest.addr.sin_port)
+			   << addrportfmt(source.addr.sin_addr, source.addr.sin_port, false)
+			   << " <-->  [   "
+			   << std::setw(5) << sock_port
+			   << "   ]  <--> "
+			   << addrportfmt(dest.addr.sin_addr, dest.addr.sin_port, true)
 			   ;
 		} else {
+			char buf[30];
+			snprintf(buf, sizeof(buf), "%5d:%-5d", proxy->sock_port, sock_port);
 			ss
-			   << (std::string)inet_ntoa(source.addr.sin_addr) << ":" << (int)ntohs(source.addr.sin_port)
-			   << "  <-->  ["
-			   << proxy->sock_port
-		           << ":"
-			   << sock_port
-			   << "]  <-->  "
-			   << (std::string)inet_ntoa(dest.addr.sin_addr) << ":" << (int)ntohs(dest.addr.sin_port)
+			   << addrportfmt(source.addr.sin_addr, source.addr.sin_port, false)
+			   << " <-->  ["
+//			   << proxy->sock_port
+//		           << ":"
+//			   << sock_port
+			   << buf
+			   << "]  <--> "
+			   << addrportfmt(dest.addr.sin_addr, dest.addr.sin_port, true)
 			;
 		}
 		ss << " [out=" << total_sent << "B, in=" << total_received << "B]";
@@ -379,10 +382,11 @@ public:
 		out << "Listening on port " << sock_port << ", forwarding to " << dest.getHost() << ":" << dest.getPort() << ", pid=" << getpid() << "\n";
 		out << n_past_connections << " past connections, " <<  connections.size() << " active connections.\n\n";
 
-		out << "Server: " << stats() << "\n";
+		out << "Forwarder:\n  " << stats() << "\n\n";
+		out << "Active connections:\n";
 		FOREACH(connections)
 		{
-			out << i->second->stats() << "\n";
+			out << "  " << i->second->stats() << "\n";
 		}
 
 		uint64_t total_sent = total_past_bytes_sent + this->total_sent;

@@ -48,3 +48,14 @@ std::string str_interval(time_t dt0)
 
 	return ss.str();
 }
+
+std::string addrportfmt(in_addr &addr, unsigned short port, bool left_align)
+{
+	char buffer1[30];
+	//snprintf(buffer, sizeof(buffer), "%15s:%-5d", inet_ntoa(addr), (int)ntohs(port));
+	snprintf(buffer1, sizeof(buffer1), "%s:%d", inet_ntoa(addr), (int)ntohs(port));
+
+	char buffer[30];
+	snprintf(buffer, sizeof(buffer), left_align ? "%-21s" : "%21s", buffer1);
+	return buffer;
+}

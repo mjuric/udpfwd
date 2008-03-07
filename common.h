@@ -9,5 +9,6 @@
 
 in_addr_t gethostbyname_or_die(const std::string &host);
 std::string str_interval(time_t dt);
+std::string addrportfmt(in_addr &addr, unsigned short port, bool left_align = 1);
 
 #endif

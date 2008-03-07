@@ -211,9 +211,9 @@ public:
 		if(!proxy) {
 			ss
 			   << addrportfmt(source.addr.sin_addr, source.addr.sin_port, false)
-			   << " <-->  [   "
+			   << "  <-->  [   "
 			   << std::setw(5) << sock_port
-			   << "   ]  <--> "
+			   << "   ]  <-->  "
 			   << addrportfmt(dest.addr.sin_addr, dest.addr.sin_port, true)
 			   ;
 		} else {
@@ -221,12 +221,9 @@ public:
 			snprintf(buf, sizeof(buf), "%5d:%-5d", proxy->sock_port, sock_port);
 			ss
 			   << addrportfmt(source.addr.sin_addr, source.addr.sin_port, false)
-			   << " <-->  ["
-//			   << proxy->sock_port
-//		           << ":"
-//			   << sock_port
+			   << "  <-->  ["
 			   << buf
-			   << "]  <--> "
+			   << "]  <-->  "
 			   << addrportfmt(dest.addr.sin_addr, dest.addr.sin_port, true)
 			;
 		}
@@ -315,7 +312,7 @@ public:
 	
 	std::ostream &log()
 	{
-		return logstrm << "[" << timestamp() << "] ";
+		return logstrm << timestamp() << " udpfwd[" << pid << "]: ";
 	}
 
 	connection *open_connection(const endpoint &source)
@@ -379,14 +376,12 @@ public:
 
 		time_t ut = time(NULL) - time_of_start;
 		out << timestamp() << ", Up for " << str_interval(ut) << "\n";
-		out << "Listening on port " << sock_port << ", forwarding to " << dest.getHost() << ":" << dest.getPort() << ", pid=" << getpid() << "\n";
+		out << "Listening on port " << sock_port << ", forwarding to " << dest.getHost() << ":" << dest.getPort() << ", pid=" << pid << "\n";
 		out << n_past_connections << " past connections, " <<  connections.size() << " active connections.\n\n";
 
-		out << "Forwarder:\n  " << stats() << "\n\n";
-		out << "Active connections:\n";
 		FOREACH(connections)
 		{
-			out << "  " << i->second->stats() << "\n";
+			out << "   " << i->second->stats() << "\n";
 		}
 
 		uint64_t total_sent = total_past_bytes_sent + this->total_sent;
@@ -460,14 +455,17 @@ public:
 		update_status(true);
 	}
 
+	int pid;
 	int setup()
 	{
+		pid = getpid();
+
 		if(!open_log_stream(log_file))
 		{
 			std::cerr << "Cannot open log file " << log_file << " for appending. Make sure the subdirectory 'log' exists (see the README file for details). Logging and status reporting disabled.\n";
 		}
 
-		log() << "Starting UDP relay, pid=" << getpid() << "\n";
+		log() << "Starting UDP relay, pid=" << pid << "\n";
 		log() << "Relaying from " << sock_port << " to " << dest.getHost() << ":" << dest.getPort() << "\n";
 
 		rs = this;

@@ -1,0 +1,3 @@
+# Expand commit ID in version.h when the tree is extracted via git-archive
+version.h	export-subst
+VERSION		export-subst

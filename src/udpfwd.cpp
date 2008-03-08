@@ -45,6 +45,7 @@
 #include <list>
 
 #include "common.h"
+#include "version.h"
 
 //
 // Settings
@@ -571,6 +572,8 @@ void ctrlc_signal_handler(int sig)
 
 int main(int argc, char **argv)
 {
+	PRINT_VERSION_IF_ASKED(argc, argv);
+
 	std::string dest_ip;
 	uint16_t dest_port;
 	uint16_t listen_port;

@@ -28,8 +28,12 @@
 #include <iostream>
 #include <string>
 
+#include "version.h"
+
 int main(int argc, char **argv)
 {
+	PRINT_VERSION_IF_ASKED(argc, argv);
+
 	if(argc != 2)
 	{
 		std::cerr << "UDP packet reflector -- returns received packets to their senders.\n";

@@ -26,9 +26,12 @@
 #include <sstream>
 
 #include "common.h"
+#include "version.h"
 
 int main(int argc, char **argv)
 {
+	PRINT_VERSION_IF_ASKED(argc, argv);
+
 	if(argc != 4 && argc != 5)
 	{
 		std::cerr << "Usage: " << argv[0] << " <dest_ip> <dest_port> <source_port> [seconds_between_packets=1]\n";

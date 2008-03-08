@@ -38,7 +38,7 @@ Building and Installing
 
 A simple
 
-	make
+	cd src && make
 
 should do. Then copy the executable `udpfwd' to wherever you like (e.g.,
 /usr/local/bin).

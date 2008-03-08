@@ -1,13 +1,23 @@
-all: reflect send udpfwd
+.f.o:
+	$(F77) $(FFLAGS) -I../orbfit/src/include -I./include -c $*.f -o $*.o
 
-udpfwd: udpfwd.cpp common.cpp
-	$(CXX) $(CXXFLAGS) $? $(LDFLAGS) -o $@
+.cpp.o:
+	$(CXX) $(CXXCFLAGS) -I../include -c $*.cpp -o $*.o
 
-reflect: reflect.cpp common.cpp
-	$(CXX) $(CXXFLAGS) $? $(LDFLAGS) -o $@
 
-send: send.cpp common.cpp
-	$(CXX) $(CXXFLAGS) $? $(LDFLAGS) -o $@
+ALL=reflect send udpfwd
+
+all: $(ALL)
+
+
+udpfwd: udpfwd.o common.o
+	$(CXX) $(CXXFLAGS) $^ $(LDFLAGS) -o $@
+
+reflect: reflect.o common.o
+	$(CXX) $(CXXFLAGS) $^ $(LDFLAGS) -o $@
+
+send: send.o common.o
+	$(CXX) $(CXXFLAGS) $^ $(LDFLAGS) -o $@
 
 clean:
-	rm -f *.o reflect send udpfwd
+	rm -f *.o $(ALL)

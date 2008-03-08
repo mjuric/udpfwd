@@ -58,7 +58,7 @@ std::string log_file    = "log/log.txt";	// log file
 
 time_t time_of_start = time(NULL);
 
-const int port_base	= 6000; // base from which outgoing port will be assigned
+int port_base		= 6000; // base from which outgoing port will be assigned
 
 // Allocate and bind socket to a port. If port=0, randomly assign it and
 // return in the argument.
@@ -571,15 +571,27 @@ void ctrlc_signal_handler(int sig)
 
 int main(int argc, char **argv)
 {
-	if(argc != 4)
+	std::string dest_ip;
+	uint16_t dest_port;
+	uint16_t listen_port;
+
+	option_reader o;
+
+	o.add("inactivity-timeout", shutdown_interval, option_reader::optparam);
+	o.add("update-interval", gc_interval, option_reader::optparam);
+	o.add("status", status_file, option_reader::optparam);
+	o.add("log", log_file, option_reader::optparam);
+	o.add("port-base", port_base, option_reader::optparam);
+
+	o.add("forward_to_ip", dest_ip, option_reader::arg);
+	o.add("forward_to_port", dest_port, option_reader::arg);
+	o.add("listen_at_port", listen_port, option_reader::arg);
+
+	if(!o.process(argc, argv))
 	{
-		std::cerr << "Usage: " << argv[0] << " <forward_to_ip> <forward_to_port> <listen_at_port>\n";
+		std::cerr << "Usage: " << o.cmdline_usage(argv[0]) << "\n";
 		return -1;
 	}
-
-	std::string dest_ip = argv[1];
-	uint16_t dest_port = atoi(argv[2]);
-	uint16_t listen_port = atoi(argv[3]);
 
 	// Create socket on which we'll listen for incoming packets
 	relay_socket relay;

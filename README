@@ -47,13 +47,12 @@ should do. Then copy the executable `udpfwd' to wherever you like (e.g.,
 Logging
 =======
 
-A connection log and status file will be created in subdirectory 'log' of
-the directory from which you start udpfwd. If this subdirectory does not
-exist, or the log file cannot be written for any reason, logging will be
-disabled.
+A connection log and status file will by default be created in subdirectory
+'log' of the directory from which you start udpfwd. If the the log file
+cannot be written for any reason, logging will be disabled.
 
-If you want to tweak logging-related settings, edit the top of udpfwd.cpp
-and recompile.
+You can change the log and status file destinations using the --log and
+--status command line options.
 
 
 Where is this useful

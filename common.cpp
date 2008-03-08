@@ -52,10 +52,119 @@ std::string str_interval(time_t dt0)
 std::string addrportfmt(in_addr &addr, unsigned short port, bool left_align)
 {
 	char buffer1[30];
-	//snprintf(buffer, sizeof(buffer), "%15s:%-5d", inet_ntoa(addr), (int)ntohs(port));
 	snprintf(buffer1, sizeof(buffer1), "%s:%d", inet_ntoa(addr), (int)ntohs(port));
 
 	char buffer[30];
 	snprintf(buffer, sizeof(buffer), left_align ? "%-21s" : "%21s", buffer1);
 	return buffer;
+}
+
+///// option_reader implementation
+std::string option_reader::cmdline_usage(const std::string &progname) const
+{
+	std::stringstream ss;
+	ss << progname << " " << help();
+	return ss.str();
+}
+
+std::string option_reader::help() const
+{
+	std::ostringstream args, opts;
+	FOREACH(params)
+	{
+		switch((*i)->type)
+		{
+		case arg:
+			args << "<" << (*i)->name << "> ";
+			break;
+		case optparam:
+			opts << "[--" << (*i)->name << "="; (*i)->write_val(opts); opts << "] ";
+			break;
+		}
+	}
+	return opts.str() + args.str();
+}
+
+bool option_reader::process(int argc, char **argv)
+{
+	int iarg = 0;
+	for(int i = 1; i != argc; i++)
+	{
+		std::string arg = argv[i];
+
+		if(arg.find("--") == 0)
+		{
+			// process option
+			bool opt_found = false;
+			FOREACH(params)
+			{
+				if((*i)->type != optparam) { continue; }
+
+				std::string opt = (*i)->name + "=";
+				//std::cerr << opt << " =?= " << arg << "\n";
+				if(arg.find(opt, 2) != 2) { continue; }
+
+				std::string val = arg.substr(2+opt.size());
+				std::istringstream ss(val);
+
+				(*i)->read_val(ss);
+				if(!ss)
+				{
+					std::cerr << "Error reading option --" << (*i)->name << ".\n";
+					return false;
+				}
+				opt_found = true;
+				break;
+			}
+			
+			if(!opt_found)
+			{
+				std::cerr << "Unknown option " << arg << ".\n";
+				return false;
+			}
+		}
+		else
+		{
+			// process argument
+			iarg++;
+			if(iarg > nargs)
+			{
+				std::cerr << "Error, too many arguments.\n";
+				return false;
+			}
+			
+			int k = 0;
+			FOREACH(params)
+			{
+				if((*i)->type != option_reader::arg) { continue; }
+				k++;
+				if(k != iarg) { continue; }
+
+				std::istringstream ss(arg);
+				(*i)->read_val(ss);
+				if(!ss)
+				{
+					std::cerr << "Error reading argument <" << (*i)->name << ">.\n";
+					return false;
+				}
+				break;
+			}
+		}
+	}
+
+	if(iarg != nargs)
+	{
+		std::cerr << "Insufficient number of arguments (" << iarg << "/" << nargs << ").\n";
+		return false;
+	}
+	
+	return true;
+}
+
+option_reader::~option_reader()
+{
+	FOREACH(params)
+	{
+		delete *i;
+	}
 }

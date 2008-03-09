@@ -1,0 +1,7 @@
+Developer Notes
+===============
+
+Website Generation
+~~~~~~~~~~~~~~~~~~
+
+ asciidoc -d book -o ~/majuric.org/html/software/udpfwd/index.html README

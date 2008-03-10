@@ -23,7 +23,7 @@
 #include <iostream>
 #include <stdlib.h>
 
-static const char SATOOLS_VERSION[] = "1.0rc1 ($Format:%ad, %an <%ae>, [%H]$)";
+static const char SATOOLS_VERSION[] = "1.0 ($Format:%ad, %an <%ae>, [%H]$)";
 
 inline void PRINT_VERSION_IF_ASKED(int argc, char **argv)
 {
